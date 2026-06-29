@@ -16,7 +16,7 @@ PRDT_BRNO = os.environ.get("PRDT_BRNO", "01") # 계좌번호 뒤 2자리 (보통
 # URL 설정: 실전투자는 openapi, 모의투자는 openapivts
 URL_BASE = os.environ.get("URL_BASE", "https://openapi.koreainvestment.com:9443")
 
-# 토큰 재장전 캐시 변수 (매번 발급받으면 서버 과부하로 차단당함)
+# 토큰 재장전 캐시 변수
 ACCESS_TOKEN = ""
 TOKEN_ISSUE_TIME = 0
 
@@ -55,25 +55,41 @@ def get_hashkey(datas):
     return res.json().get("HASH")
 
 # -------------------------------------------------------------
-# [4] 실제 매수/매도 포격 명령 하달 부대 (시장가 기준)
+# [4] 실제 매수/매도 포격 명령 하달 부대 (국내/해외 지능형 분기)
 # -------------------------------------------------------------
-def order_stock(ticker, action, qty):
+def order_stock(ticker, action, qty, market="KR", price="0", excd="NAS"):
     token = get_access_token()
-    url = f"{URL_BASE}/uapi/domestic-stock/v1/trading/order-cash"
 
-    # ⚠️ [매우 중요] TR_ID 설정 (실전투자 기준)
-    # 매수: TTTC0802U / 매도: TTTC0801U
-    # (만약 모의투자라면 VTTC0802U / VTTC0801U 로 바꿔야 합니다!)
-    tr_id = "TTTC0802U" if action == "buy" else "TTTC0801U"
+    # 🇺🇸 미국 주식 사격 제원 세팅
+    if market == "US":
+        url = f"{URL_BASE}/uapi/overseas-stock/v1/trading/order"
+        # 미국 실전투자 TR_ID (매수: JTTT1002U / 매도: JTTT1006U)
+        # (만약 모의투자라면 VTTT1002U / VTTT1006U 로 변경 필요)
+        tr_id = "JTTT1002U" if action == "buy" else "JTTT1006U"
+        data = {
+            "CANO": CANO,
+            "ACNT_PRDT_CD": PRDT_BRNO,
+            "OVRS_EXCG_CD": excd,        # 거래소코드 (NAS, NYSE, AMEX)
+            "PDNO": ticker,              # 종목코드 (예: TQQQ)
+            "ORD_QTY": str(qty),         # 주문 수량
+            "OVRS_ORD_UNPR": str(price), # 주문 가격 (미국은 지정가 필수)
+            "ORD_DVSN": "00",            # 00: 지정가
+            "ORD_SVR_DVSN_CD": "0"
+        }
 
-    data = {
-        "CANO": CANO,
-        "ACNT_PRDT_CD": PRDT_BRNO,
-        "PDNO": ticker,     # 종목코드 (예: 005930)
-        "ORD_DVSN": "01",   # 01: 시장가 주문
-        "ORD_QTY": str(qty),# 주문 수량
-        "ORD_UNPR": "0"     # 시장가이므로 가격은 0원으로 세팅
-    }
+    # 🇰🇷 국내 주식 사격 제원 세팅 (기존 로직 완벽 보존)
+    else:
+        url = f"{URL_BASE}/uapi/domestic-stock/v1/trading/order-cash"
+        # 국내 실전투자 TR_ID (매수: TTTC0802U / 매도: TTTC0801U)
+        tr_id = "TTTC0802U" if action == "buy" else "TTTC0801U"
+        data = {
+            "CANO": CANO,
+            "ACNT_PRDT_CD": PRDT_BRNO,
+            "PDNO": ticker,     # 종목코드 (예: 005930)
+            "ORD_DVSN": "01",   # 01: 시장가 주문
+            "ORD_QTY": str(qty),# 주문 수량
+            "ORD_UNPR": "0"     # 시장가이므로 가격은 0원으로 세팅
+        }
 
     headers = {
         "content-type": "application/json",
@@ -96,9 +112,14 @@ def webhook():
     data = request.json
     
     # 트레이딩뷰가 보낸 JSON 암호문 해독
-    ticker = data.get("ticker")  # 종목코드
-    action = data.get("action")  # buy 또는 sell
-    qty = data.get("qty")        # 수량
+    ticker = data.get("ticker")           # 종목코드
+    action = data.get("action")           # buy 또는 sell
+    qty = data.get("qty")                 # 수량
+    
+    # 🌟 새롭게 추가된 한미 연합 제원 🌟
+    market = data.get("market", "KR")     # "KR" 또는 "US" (안 보내면 국내로 간주)
+    price = data.get("price", "0")        # 미국주식용 가격 (국내는 무시됨)
+    excd = data.get("excd", "NAS")        # 미국 거래소 (기본값 나스닥)
 
     # 비정상적인 신호는 요격(무시)
     if not ticker or not action or not qty:
@@ -106,8 +127,8 @@ def webhook():
 
     try:
         # 정상 신호일 경우 포격 명령 함수 호출
-        result = order_stock(ticker, action, qty)
-        print(f"🎯 [타격완료] {action} {ticker} {qty}주 / 결과: {result}")
+        result = order_stock(ticker, action, qty, market, price, excd)
+        print(f"🎯 [{market} 타격완료] {action} {ticker} {qty}주 / 결과: {result}")
         return jsonify({"msg": "타격 명령 하달 성공", "result": result}), 200
     except Exception as e:
         print(f"🚨 [에러발생] 무기 체계 오류: {e}")
