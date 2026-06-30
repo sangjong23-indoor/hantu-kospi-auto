@@ -63,9 +63,11 @@ def order_stock(ticker, action, qty, market="KR", price="0", excd="NAS"):
     # 🇺🇸 미국 주식 사격 제원 세팅
     if market == "US":
         url = f"{URL_BASE}/uapi/overseas-stock/v1/trading/order"
-        # 미국 실전투자 TR_ID (매수: JTTT1002U / 매도: JTTT1006U)
-        # (만약 모의투자라면 VTTT1002U / VTTT1006U 로 변경 필요)
-        tr_id = "JTTT1002U" if action == "buy" else "JTTT1006U"
+        # 미국 TR_ID는 서버 환경에 따라 다르게 사용
+        # - 실전: TTTT1002U / TTTT1006U
+        # - 모의: VTTT1002U / VTTT1006U
+        is_mock = "openapivts" in URL_BASE
+        tr_id = ("VTTT1002U" if action == "buy" else "VTTT1006U") if is_mock else ("TTTT1002U" if action == "buy" else "TTTT1006U")
         data = {
             "CANO": CANO,
             "ACNT_PRDT_CD": PRDT_BRNO,
